@@ -45,17 +45,14 @@ class Miner ():
         # looping through proof until found right proof that match condition based on difficulty
         while self.valid_proof(proof, proof_string) is False:
 
-            # need condition if proof reaches range. to increment step range
-            self.increment_step()
-
             # messures lambda has rate
             self.lambda_hash_rate(proof, proof_string)
 
             # increment next proof to be hashed
-            proof += 1
+            self.proof += 1
 
-            # updating class property proof
-            self.proof = proof
+            # updating proof
+            proof = self.increment_step()
 
             # calculating next proof string to be hashed
             proof_string = self.full_char_cycle(
@@ -212,7 +209,17 @@ class Miner ():
         self.base = miner_id * proof_range + step * total_miners * proof_range
 
     def increment_step(self):
-        pass
+        # need to double check proof range
+        # set base proof is corrlated with proof range
+        self.proof_range = 10000000000
+        if self.proof == self.proof_range:
+            self.step
+            self.set_base_proof()
+            self.proof = self.base
+
+            # not sure to do this or not need to check but setting it for now
+            # self.proof += 1
+        return self.proof
 
     def run(self):
         self.mine()

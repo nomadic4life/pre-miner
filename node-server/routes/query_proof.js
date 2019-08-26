@@ -101,6 +101,7 @@ const submitProof = (req, res) => {
       res.status(500).json({ message: "error" });
     });
 };
+
 module.exports = router => {
   router.get("/get-miner-id", getMinerID);
   router.get("/get-total-miners", getTotalMiners);
