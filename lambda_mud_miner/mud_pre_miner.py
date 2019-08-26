@@ -1,7 +1,7 @@
 from threading import Thread
 from multiprocessing import Process, current_process, freeze_support
 import hashlib
-# import requests
+import requests
 
 import sys
 import os
@@ -11,33 +11,6 @@ import time
 
 process_id = os.getpid()
 
-# def valid_proof(last_proof, proof, difficulty):
-#     """
-#     Validates the Proof:  Does hash(last_proof, proof) contain `difficulty`
-#     leading zeroes?
-#     """
-#     guess = f'{last_proof}{proof}'.encode()
-#     guess_hash = hashlib.sha256(guess).hexdigest()
-#     return guess_hash[:difficulty] == "0" * difficulty
-
-
-# def proof_of_work(last_proof, difficulty):
-#     """
-#     Simple Proof of Work Algorithm
-#     - Find a number p' such that hash(pp') contains `difficulty` leading
-#     zeroes, where p is the previous p'
-#     - p is the previous proof, and p' is the new proof
-#     """
-
-#     print("Searching for next proof")
-#     proof = 0
-#     while valid_proof(last_proof, proof, difficulty) is False:
-#         proof += 1
-
-#     print("Proof found: " + str(proof))
-#     return proof
-
-
 coins_mined = 0
 pre_mined = {}
 
@@ -45,6 +18,7 @@ pre_mined = {}
 class Miner ():
     def __init__(self, last_proof=0, base=0, difficulty=1, multiplier=0, multiply_rate=10000000):
         self.base = base
+        self.step = 0
         self.last_proof = last_proof
         self.difficulty = difficulty
         self.multiplier = multiplier
@@ -57,17 +31,40 @@ class Miner ():
         self.last_proof = last_proof
 
     def proof_of_work(self):
+
+        # starting of searching next proof
         print("Searching for next proof")
+
+        # setting proof starting point
         proof = self.base
-        proof_string = self.full_char_cycle(proof)
+
+        # initial point of proof string from starting proof
+        # proof_string = self.full_char_cycle(proof)
+        proof_string = self.set_char(self.multiplier, proof=proof)
+
+        # looping through proof until found right proof that match condition based on difficulty
         while self.valid_proof(proof, proof_string) is False:
+
+            # need condition if proof reaches range. to increment step range
+            self.increment_step()
+
+            # messures lambda has rate
             self.lambda_hash_rate(proof, proof_string)
+
+            # increment next proof to be hashed
             proof += 1
+
+            # updating class property proof
             self.proof = proof
+
+            # calculating next proof string to be hashed
             proof_string = self.full_char_cycle(
                 proof, self.multiplier, proof_string)
 
+        # prints found proof
         print("Proof found: " + str(proof_string))
+
+        # returns proof string but don't know why
         return proof_string
 
     def proof_of_work_mulitpier(self):
@@ -99,36 +96,123 @@ class Miner ():
 
     def valid_proof(self, proof, proof_string):
         # self.lambda_hash_rate(proof)
+
+        # encoding last proof and next proof into a utf-8 string
         guess = f'{self.last_proof}{proof_string}'.encode()
+
+        # hashing the guess
         guess_hash = hashlib.sha256(guess).hexdigest()
 
+        # checking if hashed guess matches condition
         if guess_hash[:self.difficulty] == "0" * self.difficulty:
+
+            # record end time to messure time to find proof
             self.end = time.time()
+
+            # proof is found
             self.found_proof(proof, proof_string)
 
         return guess_hash[:self.difficulty] == "0" * self.difficulty
 
     def found_proof(self, proof, proof_string):
+
+        # calculate time to find proof
         duration = self.end - self.start
+
+        # calculate hash rate
         proof_hash = self.proof * (self.multiplier + 1)
         LHR = proof_hash / duration
-        if self.difficulty not in pre_mined:
-            pre_mined[self.difficulty] = {}
 
-        pre_mined[self.difficulty][self.last_proof] = proof
-        print("Lambda Hash rate:", LHR)
-        print("new proof: ", proof, "proof string: ", proof_string, "last proof: ", self.last_proof, "difficulty: ", self.difficulty,
-              "time to mine: ", duration, "size of pre-mind: ", len(pre_mined))
-        print(pre_mined)
+        # update pre mined
+        self.update_pre_mined(proof_string)
+
+        # submit proof
+        self.submit_proof(proof_string)
+
+        # print data
+        print("  -- Lambda Hash Rate: ", LHR)
+        print("  -- New Proof: ", proof, proof_string)
+        print("  -- last proof: ", self.last_proof)
+        print("  -- difficulty: ", self.difficulty)
+        print("  -- mine duration: ", duration,)
+
+        # press enter or wait 10 sec to continue on, will change to wait 10 sec
         input("press enter to continue")
 
+    def submit_proof(self, proof):
+
+        # set end point
+        API_ENDPOINT = 'http://localhost:8000/api/submit-proof'
+
+        # set data
+        data = {"proof": proof}
+
+        # send proof to server
+        response = requests.post(url=API_ENDPOINT, data=data)
+
+        # print message
+        json_resonpse = response.json()
+        print(json_resonpse["message"])
+
+    def update_pre_mined(self, proof):
+        if self.difficulty not in pre_mined:
+            pre_mined[self.difficulty] = {}
+        pre_mined[self.difficulty][self.last_proof] = proof
+        print(" -- size of pre-mind: ", len(pre_mined))
+        print(pre_mined)
+
     def mine(self):
+        # set miner id
+        self.get_miner_id()
+
+        # wait 2 minutes for all miners to boot then continue on
+        # set base proof starting point based on how many miners exist
+        self.set_base_proof()
+
+        # start mining process
         while True:
+
+            # starting point of mine
             self.start = time.time()
+
+            # reseting step back to zero
+            self.step = 0
+
+            # retrieve last proof
+            self.get_last_proof()
+
+            # seleting which POW algorithm based on miner mulitpiler
             if self.multiplier != 0:
+
+                # algorithm for many miner multipliers
                 self.proof_of_work_mulitpier()
             else:
+
+                # algorithm for 1 miner multiplier
                 self.proof_of_work()
+
+    def get_last_proof(self):
+        response = requests.get('http://localhost:8000/api/get-proof')
+        json_resonpse = response.json()
+        self.set_difficulty(json_resonpse["difficulty"])
+        self.set_last_proof(json_resonpse["proof"])
+
+    def get_miner_id(self):
+        response = requests.get('http://localhost:8000/api/get-miner-id')
+        json_resonpse = response.json()
+        self.miner_id = json_resonpse["miner_id"]
+
+    def set_base_proof(self):
+        response = requests.get('http://localhost:8000/api/get-total-miners')
+        json_resonpse = response.json()
+        total_miners = json_resonpse["total_miners"]
+        step = self.step
+        miner_id = self.miner_id
+        proof_range = 10000000000
+        self.base = miner_id * proof_range + step * total_miners * proof_range
+
+    def increment_step(self):
+        pass
 
     def run(self):
         self.mine()
@@ -141,9 +225,12 @@ class Miner ():
             duration = self.end - self.start
             proof = proof * (self.multiplier + 1)
             LHR = proof / duration
-            print(self.multiplier)
-            print("Lambda Hash rate:", LHR,
-                  proof_string, len(proof_string), self.proof)
+            print("multipier rate", self.multiplier)
+            print("Lambda Hash rate:", LHR)
+            print("proof_string", proof_string)
+            print("proof_string size", len(proof_string))
+            print("last proof", self.last_proof)
+            print("current proof", self.proof)
 
     def instance_of_Proof(self, proof, multiplier=0, proof_string=""):
         proof = multiplier + proof
@@ -156,19 +243,16 @@ class Miner ():
         pointer = 0
         size = len(string)
         text = chr(num)
-        # print(size)
 
         if num == 0:
             if size == 0:
                 string = f'{text}{string}'
-                # print("here", proof)
             else:
                 while True:
                     if size - 1 >= pointer:
                         current = size - 1 - pointer
                         value = string[current: len(string) - pointer]
                         value = ord(value)
-                        # print("here test", value)
                         value += 1
                     else:
 
@@ -179,14 +263,12 @@ class Miner ():
                         break
 
                     if value == proof_range:
-                        # print("testing proof range")
                         value = 0
                         text = chr(value)
                         current = size - 1 - pointer
                         string = f'{string[ : current]}{text}{string[current + 1 : ]}'
                         pointer += 1
                     else:
-                        # print("test")
                         text = chr(value)
                         current = size - 1 - pointer
                         string = f'{string[ : current]}{text}{string[current + 1 : ]}'
@@ -194,7 +276,6 @@ class Miner ():
                         break
 
         else:
-            # print("hereereer")
             text = chr(num)
             current = size - 1 - pointer
             string = f'{string[ : current]}{text}{string[current + 1 : ]}'
@@ -204,21 +285,34 @@ class Miner ():
 
         return string
 
-    def set_char(self, multiplier, proof):
+    def set_char(self, multiplier=0, proof=0):
+        # updating proof for multiplier miner
         proof = multiplier * self.multiply_rate + proof
-        # print(proof)
+
+        # setting empty string
         string = ""
+
+        # algorithm setting proof string
         while proof >= 55295:
+
+            # this condition maybe redundent
             if proof >= 55295:
+
+                # setting num for char equivlant
                 num = proof % 55295
+
+                # updating string
                 text = chr(num)
                 string = f'{text}{string}'
                 proof = (proof // 55295)
 
+        # condition to check for proof if at 0
         if proof != 0:
             num = (proof % 55295) - 1
         else:
             num = (proof % 55295)
+
+        # updating string
         text = chr(num)
         string = f'{text}{string}'
         return string
@@ -227,7 +321,10 @@ class Miner ():
 miner = Miner(last_proof=0, difficulty=7, multiplier=23)
 miner2 = Miner(last_proof=10, difficulty=6, multiplier=14)
 
-miner2.mine()
+# miner2.mine()
+# miner2.get_last_proof()
+# miner2.get_miner_id()
+miner2.submit_proof(1234)
 
 # t = Thread(target=miner.mine)
 # t2 = Thread(target=miner2.mine)
